@@ -429,8 +429,8 @@ ggplot(reg_dfw,
 # Changing to sum-to-zero contrast
 options(contrasts = c("contr.sum", "contr.poly"))
 
-# Model fitting
-mod3_quad <- lmer(yield_mgha ~ sr_ksha + (1|rep), data = reg_dfw)
+# Model fitting: Mixed effect model has fixed effects and random effects components
+mod3_quad <- lmer(yield_mgha ~ sr_ksha + I(sr_ksha^2) + (1|rep), data = reg_dfw)
 
 # Summary
 summary(mod3_quad)
@@ -444,7 +444,6 @@ mod3_quad_aug <- augment(mod3_quad) %>%
                            type = "pearson", 
                            scaled = T))
 
-
 mod3_quad_aug
 ```
 
@@ -456,7 +455,7 @@ ggplot(mod3_quad_aug,
            y = .stdresid))+
   geom_hline(yintercept = 0, color = "red")+
   geom_point(size = 3, alpha = .7)+
-  geom_smooth(method = "lm")
+  geom_smooth()
 ```
 Residuals are looking better now, no pattern.  
 
@@ -496,6 +495,10 @@ Looks ok.
 
 ```{r mod3 ANOVA}
 summary(mod3_quad)
+
+g <- lm(yield_mgha ~ sr_ksha + I(sr_ksha^2) , data = reg_dfw)
+
+summary(g)
 
 ```
 
@@ -537,7 +540,7 @@ mod3_quad_boots <- bootMer(mod3_quad,
   confint() %>%
   as.data.frame() %>%
   rename(mod3_quad_lcl = `2.5 %`,
-         mod3_quad_upl = `97.5 %`)
+         mod3_quad_ucl = `97.5 %`)
 
 
 nd <- nd %>%
@@ -555,7 +558,7 @@ ggplot(reg_dfw,
             color = "forestgreen")+
   geom_ribbon(data = nd, aes(x = sr_ksha, 
                              ymin = mod3_quad_lcl,
-                             ymax = mod3_quad_upl),
+                             ymax = mod3_quad_ucl),
               fill = "gray", 
               alpha = 0.5, 
               inherit.aes = FALSE)
@@ -565,6 +568,9 @@ ggplot(reg_dfw,
 ```
 
 Now, which one fits the data best?
+
+Quadratic because it fits the data well and we can also extract the maximum point.
+
 Which one should we chose for finding the optimum, or predicting new data?  
 
 In our data set,   
@@ -584,7 +590,15 @@ After that, we can choose the model that best fit our data and use it to extract
 options(contrasts = c("contr.sum", "contr.poly"))
 
 # Model fitting
-mod4_linp 
+mod4_linp <- nlme(yield_mgha ~ SSlinp(sr_ksha, a, b, xs), data = reg_dfw, 
+                  random = list(rep = pdDiag(a + b + xs ~ 1)),
+                  fixed = list(a ~ 1,
+                               b ~ 1,
+                               xs ~ 1),
+                  start = c(a = 0,
+                            b = 0.3,
+                            xs = 100))
+
 
 # Summary
 summary(mod4_linp)
@@ -611,7 +625,7 @@ ggplot(mod4_linp_aug,
            y = .stdresid))+
   geom_hline(yintercept = 0, color = "red")+
   geom_point(size = 3, alpha = .7)+
-  geom_smooth(method = "lm")
+  geom_smooth()
 ```
 Looking good.  
 
@@ -628,15 +642,18 @@ Looking good.
 On this plot, looking for normality.
 
 ```{r mod4 QQ plot for Rep random effect}
-mod4_linp_randeff 
+mod4_linp_randeff <- ranef(mod4_linp) %>%
+  as.data.frame()
 
 ggplot(mod4_linp_randeff, 
        aes(sample = estimate))+
   stat_qq()+
-  stat_qq_line() 
+  stat_qq_line() +
+  facet_wrap(~term)
 
 ```
-b and xs random estimates are so small that seem to be all zero.  
+b and xs random estimates are so small that seem to be all zero.  For b and xs, there is not enough variation for random effect to be estimated.
+
 That's not a problem per se, just a fact around their variability.  
 
 ## c) Model summary
@@ -690,7 +707,7 @@ mod4_linp_boots <- boot_nlme(mod4_linp,
   confint() %>%
   as.data.frame() %>%
   rename(mod4_linp_lcl = `2.5 %`,
-         mod4_linp_upl = `97.5 %`)
+         mod4_linp_ucl = `97.5 %`)
 
 nd <- nd %>%
   bind_cols(mod4_linp_boots)
@@ -707,7 +724,7 @@ ggplot(reg_dfw,
             color = "forestgreen")+
   geom_ribbon(data = nd, aes(x = sr_ksha, 
                              ymin = mod4_linp_lcl,
-                             ymax = mod4_linp_upl),
+                             ymax = mod4_linp_ucl),
               fill = "gray", 
               alpha = 0.5, 
               inherit.aes = FALSE)
@@ -716,49 +733,91 @@ ggplot(reg_dfw,
 
 ```
 
+Now the breakpoint is around 73 as we found in the summary of the model.
+
 # 7) Model comparison  
 ## a) Visual comparison
 ```{r comparison plot}
 ggplot(reg_dfw, aes(x = sr_ksha, y = yield_mgha))+
-  geom_point(size = 4, alpha = .6)
-
-
+  geom_point(size = 4, alpha = .6) +
+  geom_line(data = nd,
+            aes(y = mod1_yield_mgha),
+            color = "forestgreen"
+            )+
+  geom_line(data = nd,
+            aes(y = mod2_yield_mgha),
+            color = "blue"
+            )+
+  geom_line(data = nd,
+            aes(y = mod3_yield_mgha),
+            color = "purple"
+            )+
+  geom_line(data = nd,
+            aes(y = mod4_yield_mgha),
+            color = "orange"
+            )
 ```
-## Table comparison  
+## Table comparison : IC_tab() comes from nlraa package
+
 ```{r}
+IC_tab(mod1_int,
+       mod2_lin,
+       mod3_quad,
+       mod4_linp
+       ) 
+
+IC_tab(mod1_int,
+       mod2_lin,
+       mod3_quad,
+       mod4_linp
+       ) %>%
+  select(model, df, AIC)
 
 ```
-Based on the above, model 4 (linear-plateau) had the lowest AIC and thus should be used to find the optimum level of seeding rate.  
+Based on the above, model 4 (linear-plateau) had the lowest AIC and thus should be used to find the optimum level of seeding rate. AIC goes on decreasing if the addition of variables is explaining variation in the data but if not then it increases. AICc is corrected AIC. This table sorts model on increasing order of AIC, BIC,.. and so on. If adding more parameters doesnot result in the reduction of AIC by at least 2 points then it is not worth it. It is better to use simpler models than a complex model that does not lead to enough reduction in AIC. Model that has larger weights fit the data better. 
+
 
 # 8) Optimum on best model  
 Because our best model was the linear-plateau, let's find its seeding rate that optimized yield.  
-
 ```{r optimum SR}
-
-
+mod4_linp %>%
+  intervals(which = "fixed")
 ```
 Based on the linear-plateau model, the level of seeding rate to optimize corn grain yield in this study was **73.47** thousand seeds/ha.  
 
 Now let's predict what was the yield at that seeding rate.  
 ```{r yield at optimum SR}
-
-
+predict(mod4_linp, 
+        newdata = data.frame(sr_ksha = 73.48),
+        level = 0
+        )
 ```
-At the optimum seeding rate of **73.47** thousand seeds/ha, corn grain yield was **13.45** Mg/ha.
+At the optimum seeding rate of **73.48** thousand seeds/ha, corn grain yield was **13.45** Mg/ha.
+
+Vertical line from x_axis to the optimum point and then horizontal line from the optimum point to the y-axis.
 
 ```{r final plot}
 ggplot(reg_dfw, aes(x = sr_ksha, y = yield_mgha))+
   geom_point(size = 4, alpha = .6)+
   geom_line(data = nd, aes(y = mod4_yield_mgha), 
             color = "orange",
-            size = 1.5) 
-
+            size = 1.5) +
+  geom_segment(x = 73.48,
+               xend = 73.48,
+               y = 0,
+               yend = 13.45) +
+  geom_segment(x = 73.48,
+               xend = 0,
+               y = 13.45,
+               yend = 13.45
+            )
 ```
+
 # 9) Take-home  
 
--   We use regression when both y and x are **numerical**  
+-   We use regression when both y and x are **numerical**. For categorical x's, we use analysis of variance. 
 
--   Finding optimum: should run multiple models, see which one fits the data best, and choose that one to estimate optimum
+-   Finding optimum: should run multiple models, see which one fits the data best, and choose that one to estimate optimum.
 
 -   Always check residuals! p-values alone do not tell you whether model is adequate for your data!
 
